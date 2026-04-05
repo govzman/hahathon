@@ -157,11 +157,7 @@ class NearestObjectsPredictor:
             image.save("input.jpg")
 
         detections = self._detect_objects_pil(image)
-
-        # оставляем только разрешённые классы
         detections = [d for d in detections if d["label"] in self.target_classes]
-
-        # берём top-k самых уверенных вообще среди всех разрешённых классов
         detections = sorted(detections, key=lambda x: x["score"], reverse=True)[: self.top_k]
 
         if not detections:
@@ -197,6 +193,7 @@ class NearestObjectsPredictor:
         return {
             "label": result["label"],
             "distance_m": result["distance_m"],
+            "bbox": result["bbox"],
         }
 
 

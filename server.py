@@ -18,11 +18,7 @@ frame_lock = threading.Lock()
 predictions_lock = threading.Lock()
 
 # Инициализация предиктора
-predictor = NearestObjectsPredictor(
-    target_classes=["person", "cat", "dog", "bus", "car"],
-    top_k=5,
-    conf_thres=0.05,
-)
+predictor = NearestObjectsPredictor()
 
 def jpeg_to_tensor(jpeg_bytes):
     """Конвертирует JPEG в torch.Tensor [3, H, W]"""
