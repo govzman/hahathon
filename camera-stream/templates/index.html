@@ -1,0 +1,485 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>📷 Camera Stream</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: #0a0a0a;
+            color: #fff;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+        }
+
+        /* ===== Экран выбора роли ===== */
+        #role-select {
+            text-align: center;
+            padding: 20px;
+        }
+
+        #role-select h1 {
+            font-size: 2em;
+            margin-bottom: 10px;
+        }
+
+        #role-select p {
+            color: #888;
+            margin-bottom: 40px;
+            font-size: 1.1em;
+        }
+
+        .role-btn {
+            display: block;
+            width: 300px;
+            margin: 15px auto;
+            padding: 20px 30px;
+            font-size: 1.2em;
+            font-weight: 600;
+            border: none;
+            border-radius: 16px;
+            cursor: pointer;
+            transition: transform 0.15s, box-shadow 0.15s;
+        }
+
+        .role-btn:active {
+            transform: scale(0.96);
+        }
+
+        .btn-camera {
+            background: linear-gradient(135deg, #007AFF, #5856D6);
+            color: white;
+            box-shadow: 0 4px 20px rgba(0, 122, 255, 0.4);
+        }
+
+        .btn-viewer {
+            background: linear-gradient(135deg, #34C759, #30D158);
+            color: white;
+            box-shadow: 0 4px 20px rgba(52, 199, 89, 0.4);
+        }
+
+        /* ===== Режим камеры ===== */
+        #camera-mode {
+            display: none;
+            width: 100%;
+            height: 100vh;
+            position: relative;
+        }
+
+        #camera-video {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        #camera-canvas {
+            display: none;
+        }
+
+        .camera-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            padding: 20px;
+            background: linear-gradient(to bottom, rgba(0,0,0,0.6), transparent);
+            z-index: 10;
+        }
+
+        .camera-status {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 0.9em;
+        }
+
+        .status-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: #FF3B30;
+            animation: pulse 1.5s infinite;
+        }
+
+        .status-dot.active {
+            background: #34C759;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.4; }
+        }
+
+        .camera-controls {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            padding: 30px 20px;
+            background: linear-gradient(to top, rgba(0,0,0,0.7), transparent);
+            display: flex;
+            justify-content: center;
+            gap: 20px;
+            z-index: 10;
+        }
+
+        .ctrl-btn {
+            padding: 12px 24px;
+            border-radius: 25px;
+            border: 2px solid rgba(255,255,255,0.3);
+            background: rgba(255,255,255,0.1);
+            color: white;
+            font-size: 0.9em;
+            cursor: pointer;
+            backdrop-filter: blur(10px);
+        }
+
+        .ctrl-btn.stop {
+            border-color: #FF3B30;
+            color: #FF3B30;
+        }
+
+        #fps-display {
+            font-size: 0.85em;
+            color: #aaa;
+            margin-top: 4px;
+        }
+
+        /* ===== Настройки камеры ===== */
+        .camera-settings {
+            position: absolute;
+            top: 60px;
+            right: 20px;
+            z-index: 10;
+            background: rgba(0,0,0,0.7);
+            border-radius: 12px;
+            padding: 12px 16px;
+            backdrop-filter: blur(10px);
+        }
+
+        .camera-settings label {
+            font-size: 0.8em;
+            color: #aaa;
+            display: block;
+            margin-bottom: 4px;
+        }
+
+        .camera-settings select, .camera-settings input {
+            background: rgba(255,255,255,0.1);
+            border: 1px solid rgba(255,255,255,0.2);
+            color: white;
+            padding: 6px 10px;
+            border-radius: 8px;
+            font-size: 0.85em;
+            width: 100%;
+            margin-bottom: 8px;
+        }
+
+        /* ===== Режим просмотра ===== */
+        #viewer-mode {
+            display: none;
+            width: 100%;
+            height: 100vh;
+            position: relative;
+            background: #000;
+        }
+
+        #viewer-img {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+        }
+
+        .viewer-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            padding: 20px;
+            background: linear-gradient(to bottom, rgba(0,0,0,0.6), transparent);
+            z-index: 10;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .viewer-status {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .back-btn {
+            padding: 8px 16px;
+            border-radius: 20px;
+            border: 1px solid rgba(255,255,255,0.3);
+            background: rgba(255,255,255,0.1);
+            color: white;
+            font-size: 0.85em;
+            cursor: pointer;
+            text-decoration: none;
+        }
+
+        .waiting-message {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            color: #666;
+        }
+
+        .waiting-message .spinner {
+            width: 40px;
+            height: 40px;
+            border: 3px solid #333;
+            border-top-color: #007AFF;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 15px;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- ===== Выбор роли ===== -->
+    <div id="role-select">
+        <h1>📷 Camera Stream</h1>
+        <p>Выберите режим работы</p>
+
+        <button class="role-btn btn-camera" onclick="startCamera()">
+            📱 Камера (отправитель)
+        </button>
+
+        <button class="role-btn btn-viewer" onclick="startViewer()">
+            🖥️ Просмотр (получатель)
+        </button>
+    </div>
+
+    <!-- ===== Режим камеры ===== -->
+    <div id="camera-mode">
+        <video id="camera-video" autoplay playsinline muted></video>
+        <canvas id="camera-canvas"></canvas>
+
+        <div class="camera-overlay">
+            <div class="camera-status">
+                <div class="status-dot" id="stream-dot"></div>
+                <span id="stream-status">Подключение...</span>
+            </div>
+            <div id="fps-display">0 FPS | 0 KB/кадр</div>
+        </div>
+
+        <div class="camera-settings" id="camera-settings">
+            <label>Камера:</label>
+            <select id="camera-select" onchange="switchCamera()">
+                <option value="environment">Задняя</option>
+                <option value="user">Передняя</option>
+            </select>
+
+            <label>Качество:</label>
+            <input type="range" id="quality-slider" min="10" max="95" value="50"
+                   oninput="document.getElementById('quality-val').textContent = this.value + '%'">
+            <span id="quality-val" style="font-size:0.8em; color:#aaa;">50%</span>
+
+            <label>Разрешение:</label>
+            <select id="resolution-select" onchange="switchCamera()">
+                <option value="640">640px</option>
+                <option value="1280" selected>1280px</option>
+                <option value="1920">1920px</option>
+            </select>
+        </div>
+
+        <div class="camera-controls">
+            <button class="ctrl-btn" onclick="toggleSettings()">⚙️ Настройки</button>
+            <button class="ctrl-btn stop" onclick="stopCamera()">⏹ Стоп</button>
+        </div>
+    </div>
+
+    <!-- ===== Режим просмотра ===== -->
+    <div id="viewer-mode">
+        <img id="viewer-img" src="" alt="Stream">
+
+        <div class="viewer-overlay">
+            <div class="viewer-status">
+                <div class="status-dot" id="viewer-dot"></div>
+                <span id="viewer-status">Ожидание потока...</span>
+            </div>
+            <a class="back-btn" href="/">← Назад</a>
+        </div>
+
+        <div class="waiting-message" id="waiting-msg">
+            <div class="spinner"></div>
+            <p>Ожидание подключения камеры...</p>
+            <p style="font-size: 0.85em; margin-top: 8px;">
+                Откройте эту страницу на телефоне<br>и нажмите "Камера"
+            </p>
+        </div>
+    </div>
+
+    <script>
+        // ===========================
+        //  РЕЖИМ КАМЕРЫ (iPhone)
+        // ===========================
+
+        let mediaStream = null;
+        let sendInterval = null;
+        let frameCount = 0;
+        let lastFpsTime = Date.now();
+        let settingsVisible = true;
+
+        async function startCamera() {
+            document.getElementById('role-select').style.display = 'none';
+            document.getElementById('camera-mode').style.display = 'block';
+
+            await initCamera();
+            startStreaming();
+        }
+
+        async function initCamera() {
+            const video = document.getElementById('camera-video');
+            const facing = document.getElementById('camera-select').value;
+            const resolution = parseInt(document.getElementById('resolution-select').value);
+
+            // Остановить предыдущий поток
+            if (mediaStream) {
+                mediaStream.getTracks().forEach(t => t.stop());
+            }
+
+            try {
+                mediaStream = await navigator.mediaDevices.getUserMedia({
+                    video: {
+                        facingMode: facing,
+                        width: { ideal: resolution },
+                        height: { ideal: resolution },
+                    },
+                    audio: false,
+                });
+                video.srcObject = mediaStream;
+                await video.play();
+
+                document.getElementById('stream-dot').classList.add('active');
+                document.getElementById('stream-status').textContent = 'Трансляция идёт';
+            } catch (err) {
+                alert('Ошибка доступа к камере: ' + err.message +
+                      '\n\nУбедитесь что вы используете HTTPS!');
+                console.error(err);
+            }
+        }
+
+        function startStreaming() {
+            if (sendInterval) clearInterval(sendInterval);
+
+            const video = document.getElementById('camera-video');
+            const canvas = document.getElementById('camera-canvas');
+            const ctx = canvas.getContext('2d');
+
+            sendInterval = setInterval(() => {
+                if (!video.videoWidth) return;
+
+                canvas.width = video.videoWidth;
+                canvas.height = video.videoHeight;
+                ctx.drawImage(video, 0, 0);
+
+                const quality = parseInt(document.getElementById('quality-slider').value) / 100;
+
+                canvas.toBlob(async (blob) => {
+                    if (!blob) return;
+
+                    try {
+                        await fetch('/upload_frame', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'image/jpeg' },
+                            body: blob,
+                        });
+
+                        // FPS счётчик
+                        frameCount++;
+                        const now = Date.now();
+                        if (now - lastFpsTime >= 1000) {
+                            const fps = frameCount;
+                            const kb = (blob.size / 1024).toFixed(0);
+                            document.getElementById('fps-display').textContent =
+                                `${fps} FPS | ${kb} KB/кадр`;
+                            frameCount = 0;
+                            lastFpsTime = now;
+                        }
+                    } catch (e) {
+                        console.error('Send error:', e);
+                    }
+                }, 'image/jpeg', quality);
+            }, 66); // ~15 FPS отправка (достаточно для плавности)
+        }
+
+        async function switchCamera() {
+            await initCamera();
+        }
+
+        function stopCamera() {
+            if (sendInterval) clearInterval(sendInterval);
+            if (mediaStream) mediaStream.getTracks().forEach(t => t.stop());
+
+            document.getElementById('stream-dot').classList.remove('active');
+            document.getElementById('stream-status').textContent = 'Остановлено';
+            document.getElementById('fps-display').textContent = '';
+        }
+
+        function toggleSettings() {
+            const el = document.getElementById('camera-settings');
+            settingsVisible = !settingsVisible;
+            el.style.display = settingsVisible ? 'block' : 'none';
+        }
+
+        // ===========================
+        //  РЕЖИМ ПРОСМОТРА (ПК)
+        // ===========================
+
+        function startViewer() {
+            document.getElementById('role-select').style.display = 'none';
+            document.getElementById('viewer-mode').style.display = 'block';
+
+            const img = document.getElementById('viewer-img');
+            const waitMsg = document.getElementById('waiting-msg');
+            const dot = document.getElementById('viewer-dot');
+            const status = document.getElementById('viewer-status');
+
+            // Используем MJPEG поток
+            img.src = '/video_feed';
+
+            img.onload = function () {
+                // Изображение загрузилось — поток работает
+                waitMsg.style.display = 'none';
+                dot.classList.add('active');
+                status.textContent = 'Трансляция активна';
+            };
+
+            img.onerror = function () {
+                dot.classList.remove('active');
+                status.textContent = 'Нет соединения';
+            };
+
+            // Проверяем наличие потока периодически
+            setInterval(() => {
+                if (img.naturalWidth > 0) {
+                    waitMsg.style.display = 'none';
+                    dot.classList.add('active');
+                    status.textContent = 'Трансляция активна';
+                }
+            }, 2000);
+        }
+    </script>
+</body>
+</html>
