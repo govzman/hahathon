@@ -42,8 +42,36 @@ class NearestObjectsPredictor:
         f = (width / 2.0) / math.tan(math.radians(self.iphone_fov_deg / 2.0))
         return f, f, cx, cy
 
-    def _load_image_rgb(self, image_path: str):
-        return Image.open(image_path).convert("RGB")
+    def _tensor_to_pil(self, image_tensor: torch.Tensor) -> Image.Image:
+        if not isinstance(image_tensor, torch.Tensor):
+            raise TypeError("image_tensor must be torch.Tensor")
+
+        tensor = image_tensor.detach().cpu()
+
+        if tensor.ndim == 4:
+            if tensor.shape[0] != 1:
+                raise ValueError("Batch tensor is supported only for batch size 1")
+            tensor = tensor[0]
+
+        if tensor.ndim != 3:
+            raise ValueError("image_tensor must have shape [C,H,W] or [1,C,H,W]")
+
+        if tensor.shape[0] not in (1, 3):
+            raise ValueError("image_tensor channel dimension must be 1 or 3")
+
+        tensor = tensor.float()
+
+        # Convert to [0, 1]
+        if tensor.max() > 1.0 or tensor.min() < 0.0:
+            tensor = tensor.clamp(0, 255) / 255.0
+
+        tensor = tensor.clamp(0.0, 1.0)
+
+        if tensor.shape[0] == 1:
+            tensor = tensor.repeat(3, 1, 1)
+
+        array = (tensor.permute(1, 2, 0).numpy() * 255.0).astype(np.uint8)
+        return Image.fromarray(array).convert("RGB")
 
     def _estimate_depth_map_pil(self, image_pil: Image.Image):
         inputs = self.depth_processor(images=image_pil, return_tensors="pt").to(self.device)
@@ -149,10 +177,13 @@ class NearestObjectsPredictor:
 
         return image
 
-    def predict(self, image_path: str):
-        image = self._load_image_rgb(image_path)
-        width, height = image.size
+    def predict(self, image_tensor: torch.Tensor, debug: bool = False):
+        image = self._tensor_to_pil(image_tensor)
 
+        # if debug:
+        #     image.save("input.jpg")
+
+        width, height = image.size
         fx, fy, cx, cy = self._compute_iphone_portrait_intrinsics(width, height)
 
         detections = self._detect_objects_pil(image)
@@ -195,10 +226,12 @@ class NearestObjectsPredictor:
                 nearest = min(candidates, key=lambda x: x["distance_3d_m"])
                 final_results.append(nearest)
 
-        vis_image = self._draw_results(image, final_results)
-        vis_image.save("output.jpg")
+        if debug:
+            vis_image = self._draw_results(image, final_results)
+            vis_image.save("output.jpg")
 
         return final_results
+
 
 if __name__ == "__main__":
     predictor = NearestObjectsPredictor(
@@ -209,8 +242,10 @@ if __name__ == "__main__":
         conf_thres=0.05,
         iphone_fov_deg=70.0,
     )
-    results = predictor.predict("input.jpg")
+
+    # Example tensor: [3, H, W], values in [0, 1]
+    example = torch.rand(3, 1280, 720)
+
+    results = predictor.predict(example, debug=True)
     for item in results:
         print(item)
-
-    print("Saved: output.jpg")
