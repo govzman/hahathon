@@ -22,7 +22,7 @@ class NearestObjectsPredictor:
     ):
         self.detection_model_name = detection_model
         self.depth_model_name = depth_model
-        self.target_classes = set(target_classes or ["person", "cat", "dog", "bus"])
+        self.target_classes = set(target_classes or ["person", "cat", "dog", "bus", "car"])
         self.top_k = top_k
         self.conf_thres = conf_thres
         self.iphone_fov_deg = iphone_fov_deg
