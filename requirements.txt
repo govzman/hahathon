@@ -3,3 +3,4 @@ pillow
 torch==2.2.2
 torchvision==0.17.2
 transformers==4.56.1
+requests
