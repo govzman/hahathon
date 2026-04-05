@@ -22,7 +22,6 @@
             justify-content: center;
         }
 
-        /* ===== Экран выбора роли ===== */
         #role-select {
             text-align: center;
             padding: 20px;
@@ -68,12 +67,12 @@
             box-shadow: 0 4px 20px rgba(52, 199, 89, 0.4);
         }
 
-        /* ===== Режим камеры ===== */
         #camera-mode {
             display: none;
             width: 100%;
             height: 100vh;
             position: relative;
+            overflow: hidden;
         }
 
         #camera-video {
@@ -84,6 +83,16 @@
 
         #camera-canvas {
             display: none;
+        }
+
+        #overlay-canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 5;
         }
 
         .camera-overlay {
@@ -155,7 +164,6 @@
             margin-top: 4px;
         }
 
-        /* ===== Настройки камеры ===== */
         .camera-settings {
             position: absolute;
             top: 60px;
@@ -185,7 +193,6 @@
             margin-bottom: 8px;
         }
 
-        /* ===== Режим просмотра ===== */
         #viewer-mode {
             display: none;
             width: 100%;
@@ -256,7 +263,6 @@
 </head>
 <body>
 
-    <!-- ===== Выбор роли ===== -->
     <div id="role-select">
         <h1>📷 Camera Stream</h1>
         <p>Выберите режим работы</p>
@@ -270,10 +276,10 @@
         </button>
     </div>
 
-    <!-- ===== Режим камеры ===== -->
     <div id="camera-mode">
         <video id="camera-video" autoplay playsinline muted></video>
         <canvas id="camera-canvas"></canvas>
+        <canvas id="overlay-canvas"></canvas>
 
         <div class="camera-overlay">
             <div class="camera-status">
@@ -309,7 +315,6 @@
         </div>
     </div>
 
-    <!-- ===== Режим просмотра ===== -->
     <div id="viewer-mode">
         <img id="viewer-img" src="" alt="Stream">
 
@@ -330,21 +335,17 @@
         </div>
     </div>
 
-    <!-- ===== Панель предсказаний ===== -->
-    <div id="predictions-panel" style="display: none; position: fixed; bottom: 20px; left: 20px; right: 20px; max-height: 200px; overflow-y: auto; background: rgba(0,0,0,0.85); border-radius: 12px; padding: 15px; z-index: 100; backdrop-filter: blur(10px);">
-        <div id="predictions-content" style="font-size: 0.9em;"></div>
-    </div>
-
     <script>
-        // ===========================
-        //  РЕЖИМ КАМЕРЫ (iPhone)
-        // ===========================
-
         let mediaStream = null;
         let sendInterval = null;
+        let predictionsInterval = null;
         let frameCount = 0;
         let lastFpsTime = Date.now();
         let settingsVisible = true;
+        let currentPredictions = [];
+
+        const overlayCanvas = document.getElementById('overlay-canvas');
+        const overlayCtx = overlayCanvas.getContext('2d');
 
         async function startCamera() {
             document.getElementById('role-select').style.display = 'none';
@@ -352,6 +353,7 @@
 
             await initCamera();
             startStreaming();
+            startPredictionUpdates();
         }
 
         async function initCamera() {
@@ -359,7 +361,6 @@
             const facing = document.getElementById('camera-select').value;
             const resolution = parseInt(document.getElementById('resolution-select').value);
 
-            // Остановить предыдущий поток
             if (mediaStream) {
                 mediaStream.getTracks().forEach(t => t.stop());
             }
@@ -376,13 +377,22 @@
                 video.srcObject = mediaStream;
                 await video.play();
 
+                // Настроить размер overlay canvas
+                resizeOverlayCanvas();
+                window.addEventListener('resize', resizeOverlayCanvas);
+
                 document.getElementById('stream-dot').classList.add('active');
                 document.getElementById('stream-status').textContent = 'Трансляция идёт';
             } catch (err) {
-                alert('Ошибка доступа к камере: ' + err.message +
-                      '\n\nУбедитесь что вы используете HTTPS!');
+                alert('Ошибка доступа к камере: ' + err.message);
                 console.error(err);
             }
+        }
+
+        function resizeOverlayCanvas() {
+            const video = document.getElementById('camera-video');
+            overlayCanvas.width = video.offsetWidth;
+            overlayCanvas.height = video.offsetHeight;
         }
 
         function startStreaming() {
@@ -411,7 +421,6 @@
                             body: blob,
                         });
 
-                        // FPS счётчик
                         frameCount++;
                         const now = Date.now();
                         if (now - lastFpsTime >= 1000) {
@@ -426,7 +435,90 @@
                         console.error('Send error:', e);
                     }
                 }, 'image/jpeg', quality);
-            }, 66); // ~15 FPS отправка (достаточно для плавности)
+            }, 66);
+        }
+
+        function startPredictionUpdates() {
+            if (predictionsInterval) clearInterval(predictionsInterval);
+
+            predictionsInterval = setInterval(async () => {
+                try {
+                    const response = await fetch('/predictions');
+                    const data = await response.json();
+                    currentPredictions = data.predictions || [];
+                    drawPredictions();
+                } catch (e) {
+                    console.error('Predictions error:', e);
+                }
+            }, 300);
+        }
+
+        function drawPredictions() {
+            const video = document.getElementById('camera-video');
+            
+            if (!video.videoWidth || !video.videoHeight) return;
+
+            overlayCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
+
+            const scaleX = overlayCanvas.width / video.videoWidth;
+            const scaleY = overlayCanvas.height / video.videoHeight;
+
+            currentPredictions.forEach(pred => {
+                const [x1, y1, x2, y2] = pred.bbox;
+
+                const sx1 = x1 * scaleX;
+                const sy1 = y1 * scaleY;
+                const sx2 = x2 * scaleX;
+                const sy2 = y2 * scaleY;
+
+                const w = sx2 - sx1;
+                const h = sy2 - sy1;
+
+                // Красивый градиентный прямоугольник
+                overlayCtx.strokeStyle = '#00FF00';
+                overlayCtx.lineWidth = 3;
+                overlayCtx.shadowColor = '#00FF00';
+                overlayCtx.shadowBlur = 10;
+                overlayCtx.strokeRect(sx1, sy1, w, h);
+                overlayCtx.shadowBlur = 0;
+
+                // Фон для текста
+                const emoji = {
+                    'person': '🚶',
+                    'car': '🚗',
+                    'bus': '🚌',
+                    'bicycle': '🚲',
+                    'cat': '🐱',
+                    'dog': '🐶'
+                }[pred.label] || '📦';
+
+                const text = `${emoji} ${pred.label} ${pred.distance_3d_m.toFixed(1)}m`;
+                
+                overlayCtx.font = 'bold 16px -apple-system, sans-serif';
+                const metrics = overlayCtx.measureText(text);
+                const textWidth = metrics.width;
+                const textHeight = 20;
+
+                // Полупрозрачный фон
+                overlayCtx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+                overlayCtx.fillRect(sx1, sy1 - textHeight - 5, textWidth + 10, textHeight + 5);
+
+                // Текст
+                overlayCtx.fillStyle = '#00FF00';
+                overlayCtx.fillText(text, sx1 + 5, sy1 - 8);
+
+                // Точка глубины
+                if (pred.point_uv) {
+                    const [u, v] = pred.point_uv;
+                    const su = u * scaleX;
+                    const sv = v * scaleY;
+
+                    overlayCtx.fillStyle = '#FF0000';
+                    overlayCtx.beginPath();
+                    overlayCtx.arc(su, sv, 6, 0, Math.PI * 2);
+                    overlayCtx.fill();
+                }
+            });
         }
 
         async function switchCamera() {
@@ -435,11 +527,14 @@
 
         function stopCamera() {
             if (sendInterval) clearInterval(sendInterval);
+            if (predictionsInterval) clearInterval(predictionsInterval);
             if (mediaStream) mediaStream.getTracks().forEach(t => t.stop());
 
             document.getElementById('stream-dot').classList.remove('active');
             document.getElementById('stream-status').textContent = 'Остановлено';
             document.getElementById('fps-display').textContent = '';
+            
+            overlayCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
         }
 
         function toggleSettings() {
@@ -448,54 +543,9 @@
             el.style.display = settingsVisible ? 'block' : 'none';
         }
 
-        // ===========================
-        //  РЕЖИМ ПРОСМОТРА (ПК)
-        // ===========================
-
         function startViewer() {
             document.getElementById('role-select').style.display = 'none';
             document.getElementById('viewer-mode').style.display = 'block';
-
-            const img = document.getElementById('viewer-img');
-            const waitMsg = document.getElementById('waiting-msg');
-            const dot = document.getElementById('viewer-dot');
-            const status = document.getElementById('viewer-status');
-
-            // Используем MJPEG поток
-            img.src = '/video_feed';
-
-            img.onload = function () {
-                // Изображение загрузилось — поток работает
-                waitMsg.style.display = 'none';
-                dot.classList.add('active');
-                status.textContent = 'Трансляция активна';
-            };
-
-            img.onerror = function () {
-                dot.classList.remove('active');
-                status.textContent = 'Нет соединения';
-            };
-
-            // Проверяем наличие потока периодически
-            setInterval(() => {
-                if (img.naturalWidth > 0) {
-                    waitMsg.style.display = 'none';
-                    dot.classList.add('active');
-                    status.textContent = 'Трансляция активна';
-                }
-            }, 2000);
-        }
-    
-        // ===========================
-        //  РЕЖИМ ПРОСМОТРА С AI
-        // ===========================
-
-        let predictionsInterval = null;
-
-        function startViewer() {
-            document.getElementById('role-select').style.display = 'none';
-            document.getElementById('viewer-mode').style.display = 'block';
-            document.getElementById('predictions-panel').style.display = 'block';
 
             const img = document.getElementById('viewer-img');
             const waitMsg = document.getElementById('waiting-msg');
@@ -522,51 +572,6 @@
                     status.textContent = 'Трансляция активна';
                 }
             }, 2000);
-
-            // Загрузка предсказаний
-            loadPredictions();
-            predictionsInterval = setInterval(loadPredictions, 500);
-        }
-
-        function loadPredictions() {
-            fetch('/predictions')
-                .then(r => r.json())
-                .then(data => {
-                    const panel = document.getElementById('predictions-content');
-                    
-                    if (!data.predictions || data.predictions.length === 0) {
-                        panel.innerHTML = '<div style="color: #666;">Нет объектов</div>';
-                        return;
-                    }
-
-                    let html = '';
-                    data.predictions.forEach(pred => {
-                        const emoji = {
-                            'person': '🚶',
-                            'car': '🚗',
-                            'bus': '🚌',
-                            'bicycle': '🚲',
-                            'cat': '🐱',
-                            'dog': '🐶'
-                        }[pred.label] || '📦';
-
-                        html += `
-                            <div style="margin-bottom: 10px; padding: 8px; background: rgba(255,255,255,0.05); border-radius: 8px; border-left: 3px solid #007AFF;">
-                                <div style="display: flex; justify-content: space-between; align-items: center;">
-                                    <span style="font-weight: 600;">${emoji} ${pred.label}</span>
-                                    <span style="color: #34C759; font-weight: 600;">${pred.distance_3d_m.toFixed(1)}m</span>
-                                </div>
-                                <div style="font-size: 0.8em; color: #aaa; margin-top: 4px;">
-                                    Уверенность: ${(pred.confidence * 100).toFixed(0)}% | 
-                                    Глубина: ${pred.depth_z_m.toFixed(1)}m
-                                </div>
-                            </div>
-                        `;
-                    });
-
-                    panel.innerHTML = html;
-                })
-                .catch(e => console.error('Prediction load error:', e));
         }
     </script>
 </body>

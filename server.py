@@ -30,7 +30,7 @@ def jpeg_to_tensor(jpeg_bytes):
     """Конвертирует JPEG в torch.Tensor [3, H, W]"""
     image = Image.open(io.BytesIO(jpeg_bytes)).convert("RGB")
     array = np.array(image).astype(np.float32) / 255.0
-    tensor = torch.from_numpy(array).permute(2, 0, 1)  # [H,W,3] -> [3,H,W]
+    tensor = torch.from_numpy(array).permute(2, 0, 1)
     return tensor
 
 def process_frame_thread():
@@ -47,7 +47,6 @@ def process_frame_thread():
         if frame is None:
             continue
         
-        # Обрабатываем каждый 5-й кадр (~3 FPS при 15 FPS входе)
         frame_skip += 1
         if frame_skip < 5:
             continue
@@ -63,7 +62,6 @@ def process_frame_thread():
         except Exception as e:
             print(f"Prediction error: {e}")
 
-# Запуск фонового потока
 processing_thread = threading.Thread(target=process_frame_thread, daemon=True)
 processing_thread.start()
 
