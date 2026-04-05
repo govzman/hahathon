@@ -4,11 +4,68 @@ import os
 import threading
 import time
 import ssl
+import torch
+import numpy as np
+from PIL import Image
+import io
+from cv_model import NearestObjectsPredictor
 
 app = Flask(__name__)
 
 latest_frame = None
+latest_predictions = []
 frame_lock = threading.Lock()
+predictions_lock = threading.Lock()
+
+# Инициализация предиктора
+predictor = NearestObjectsPredictor(
+    detection_model="hustvl/yolos-tiny",
+    depth_model="depth-anything/Depth-Anything-V2-Metric-Outdoor-Small-hf",
+    target_classes=["person", "cat", "dog", "bus", "car", "bicycle"],
+    top_k=3,
+    conf_thres=0.3,
+)
+
+def jpeg_to_tensor(jpeg_bytes):
+    """Конвертирует JPEG в torch.Tensor [3, H, W]"""
+    image = Image.open(io.BytesIO(jpeg_bytes)).convert("RGB")
+    array = np.array(image).astype(np.float32) / 255.0
+    tensor = torch.from_numpy(array).permute(2, 0, 1)  # [H,W,3] -> [3,H,W]
+    return tensor
+
+def process_frame_thread():
+    """Фоновый поток для обработки кадров"""
+    global latest_frame, latest_predictions
+    frame_skip = 0
+    
+    while True:
+        time.sleep(0.1)
+        
+        with frame_lock:
+            frame = latest_frame
+        
+        if frame is None:
+            continue
+        
+        # Обрабатываем каждый 5-й кадр (~3 FPS при 15 FPS входе)
+        frame_skip += 1
+        if frame_skip < 5:
+            continue
+        frame_skip = 0
+        
+        try:
+            tensor = jpeg_to_tensor(frame)
+            results = predictor.predict(tensor, debug=False)
+            
+            with predictions_lock:
+                latest_predictions = results
+                
+        except Exception as e:
+            print(f"Prediction error: {e}")
+
+# Запуск фонового потока
+processing_thread = threading.Thread(target=process_frame_thread, daemon=True)
+processing_thread.start()
 
 def get_local_ip():
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -87,6 +144,13 @@ def upload_frame():
     
     return jsonify({"status": "no data"}), 400
 
+@app.route("/predictions")
+def get_predictions():
+    """API для получения текущих предсказаний"""
+    with predictions_lock:
+        preds = latest_predictions.copy()
+    return jsonify({"predictions": preds})
+
 def generate_mjpeg():
     while True:
         with frame_lock:
@@ -114,11 +178,10 @@ if __name__ == "__main__":
     port = 5000
     
     print("=" * 60)
-    print("📷 Camera Stream Server")
+    print("📷 Camera Stream Server with AI Detection")
     print("=" * 60)
-    print(f"🔍 Обнаружен IP раздачи: {ip}")
+    print(f"🔍 Обнаружен IP: {ip}")
     
-    # Удаляем старые сертификаты если IP изменился
     if os.path.exists("cert.pem"):
         os.remove("cert.pem")
     if os.path.exists("key.pem"):
@@ -134,19 +197,15 @@ if __name__ == "__main__":
         print("✅ SSL сертификат создан")
     except Exception as e:
         print(f"⚠️ SSL ошибка: {e}")
-        import traceback
-        traceback.print_exc()
         ssl_context = None
         protocol = "http"
     
     print()
     print(f"📱 iPhone: {protocol}://{ip}:{port}")
     print(f"🖥️  PC:    {protocol}://{ip}:{port}")
-    print()
-    print("⚠️  На iPhone: при предупреждении нажмите 'Дополнительно' → 'Посетить сайт'")
     print("=" * 60)
     
     if ssl_context:
-        app.run(host="0.0.0.0", port=port, ssl_context=ssl_context, debug=False)
+        app.run(host="0.0.0.0", port=port, ssl_context=ssl_context, debug=False, threaded=True)
     else:
-        app.run(host="0.0.0.0", port=port, debug=False)
+        app.run(host="0.0.0.0", port=port, debug=False, threaded=True)
