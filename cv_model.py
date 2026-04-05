@@ -18,6 +18,7 @@ class NearestObjectsPredictor:
         top_k: int = 5,
         conf_thres: float = 0.05,
         iphone_fov_deg: float = 70.0,
+        trigger_distance_m: float = 4.0,
         device: str | None = None,
     ):
         self.detection_model_name = detection_model
@@ -26,6 +27,7 @@ class NearestObjectsPredictor:
         self.top_k = top_k
         self.conf_thres = conf_thres
         self.iphone_fov_deg = iphone_fov_deg
+        self.trigger_distance_m = trigger_distance_m
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
 
         self.det_processor = AutoImageProcessor.from_pretrained(self.detection_model_name)
@@ -61,7 +63,6 @@ class NearestObjectsPredictor:
 
         tensor = tensor.float()
 
-        # Convert to [0, 1]
         if tensor.max() > 1.0 or tensor.min() < 0.0:
             tensor = tensor.clamp(0, 255) / 255.0
 
@@ -156,7 +157,7 @@ class NearestObjectsPredictor:
         D = math.sqrt(X * X + Y * Y + z * z)
         return X, Y, D
 
-    def _draw_results(self, image_pil: Image.Image, results: list[dict]):
+    def _draw_results(self, image_pil: Image.Image, results: list[dict], signal: str):
         image = image_pil.copy()
         draw = ImageDraw.Draw(image)
 
@@ -175,13 +176,23 @@ class NearestObjectsPredictor:
                 r = 4
                 draw.ellipse((u - r, v - r, u + r, v + r), fill="red")
 
+        draw.text((10, 10), f"signal: {signal}", fill="yellow")
         return image
+
+    def _class_to_signal(self, label: str) -> str:
+        if label == "person":
+            return "+"
+        if label in {"cat", "dog"}:
+            return "-"
+        if label in {"bus", "car"}:
+            return "0"
+        return ""
 
     def predict(self, image_tensor: torch.Tensor, debug: bool = False):
         image = self._tensor_to_pil(image_tensor)
 
-        # if debug:
-        #     image.save("input.jpg")
+        if debug:
+            image.save("input.jpg")
 
         width, height = image.size
         fx, fy, cx, cy = self._compute_iphone_portrait_intrinsics(width, height)
@@ -226,26 +237,34 @@ class NearestObjectsPredictor:
                 nearest = min(candidates, key=lambda x: x["distance_3d_m"])
                 final_results.append(nearest)
 
+        signal = ""
+
+        if final_results:
+            global_nearest = min(final_results, key=lambda x: x["distance_3d_m"])
+            if global_nearest["distance_3d_m"] < self.trigger_distance_m:
+                signal = self._class_to_signal(global_nearest["label"])
+
         if debug:
-            vis_image = self._draw_results(image, final_results)
+            vis_image = self._draw_results(image, final_results, signal)
             vis_image.save("output.jpg")
 
-        return final_results
+        return final_results, signal
 
 
 if __name__ == "__main__":
     predictor = NearestObjectsPredictor(
         detection_model="hustvl/yolos-tiny",
         depth_model="depth-anything/Depth-Anything-V2-Metric-Outdoor-Small-hf",
-        target_classes=["person", "cat", "dog", "bus"],
+        target_classes=["person", "cat", "dog", "bus", "car"],
         top_k=5,
         conf_thres=0.05,
         iphone_fov_deg=70.0,
+        trigger_distance_m=4.0,
     )
 
-    # Example tensor: [3, H, W], values in [0, 1]
     example = torch.rand(3, 1280, 720)
+    results, signal = predictor.predict(example, debug=True)
 
-    results = predictor.predict(example, debug=True)
+    print("signal:", signal)
     for item in results:
         print(item)

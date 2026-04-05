@@ -54,7 +54,7 @@ def process_frame_thread():
         
         try:
             tensor = jpeg_to_tensor(frame)
-            results = predictor.predict(tensor, debug=False)
+            results, signal = predictor.predict(tensor, debug=False)
             
             with predictions_lock:
                 latest_predictions = results
