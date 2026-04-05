@@ -19,11 +19,9 @@ predictions_lock = threading.Lock()
 
 # Инициализация предиктора
 predictor = NearestObjectsPredictor(
-    detection_model="hustvl/yolos-tiny",
-    depth_model="depth-anything/Depth-Anything-V2-Metric-Outdoor-Small-hf",
-    target_classes=["person", "cat", "dog", "bus", "car", "bicycle"],
-    top_k=3,
-    conf_thres=0.3,
+    target_classes=["person", "cat", "dog", "bus", "car"],
+    top_k=5,
+    conf_thres=0.05,
 )
 
 def jpeg_to_tensor(jpeg_bytes):
@@ -54,7 +52,7 @@ def process_frame_thread():
         
         try:
             tensor = jpeg_to_tensor(frame)
-            results, signal = predictor.predict(tensor, debug=False)
+            results = predictor.predict(tensor, debug=False)
             
             with predictions_lock:
                 latest_predictions = results
