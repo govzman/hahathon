@@ -377,9 +377,28 @@
                 video.srcObject = mediaStream;
                 await video.play();
 
+                // Ждём пока видео реально начнёт отображаться
+                await new Promise(resolve => {
+                    const checkLoaded = () => {
+                        if (video.videoWidth > 0 && video.videoHeight > 0) {
+                            resolve();
+                        } else {
+                            setTimeout(checkLoaded, 50);
+                        }
+                    };
+                    checkLoaded();
+                });
+
                 // Настроить размер overlay canvas
                 resizeOverlayCanvas();
+                
+                // Обновляем при изменении ориентации/размера
+                window.removeEventListener('resize', resizeOverlayCanvas);
                 window.addEventListener('resize', resizeOverlayCanvas);
+                
+                // Обновляем при изменении размеров видео
+                video.removeEventListener('loadedmetadata', resizeOverlayCanvas);
+                video.addEventListener('loadedmetadata', resizeOverlayCanvas);
 
                 document.getElementById('stream-dot').classList.add('active');
                 document.getElementById('stream-status').textContent = 'Трансляция идёт';
@@ -391,8 +410,35 @@
 
         function resizeOverlayCanvas() {
             const video = document.getElementById('camera-video');
+            
+            // Учитываем object-fit: cover
+            const videoRatio = video.videoWidth / video.videoHeight;
+            const containerRatio = video.offsetWidth / video.offsetHeight;
+            
+            let renderWidth, renderHeight, offsetX, offsetY;
+            
+            if (containerRatio > videoRatio) {
+                // Видео обрезано по высоте
+                renderWidth = video.offsetWidth;
+                renderHeight = video.offsetWidth / videoRatio;
+                offsetX = 0;
+                offsetY = (video.offsetHeight - renderHeight) / 2;
+            } else {
+                // Видео обрезано по ширине
+                renderWidth = video.offsetHeight * videoRatio;
+                renderHeight = video.offsetHeight;
+                offsetX = (video.offsetWidth - renderWidth) / 2;
+                offsetY = 0;
+            }
+            
             overlayCanvas.width = video.offsetWidth;
             overlayCanvas.height = video.offsetHeight;
+            
+            // Сохраняем для использования в drawPredictions
+            overlayCanvas.dataset.renderWidth = renderWidth;
+            overlayCanvas.dataset.renderHeight = renderHeight;
+            overlayCanvas.dataset.offsetX = offsetX;
+            overlayCanvas.dataset.offsetY = offsetY;
         }
 
         function startStreaming() {
@@ -460,21 +506,31 @@
 
             overlayCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
 
-            const scaleX = overlayCanvas.width / video.videoWidth;
-            const scaleY = overlayCanvas.height / video.videoHeight;
+            const renderWidth = parseFloat(overlayCanvas.dataset.renderWidth || overlayCanvas.width);
+            const renderHeight = parseFloat(overlayCanvas.dataset.renderHeight || overlayCanvas.height);
+            const offsetX = parseFloat(overlayCanvas.dataset.offsetX || 0);
+            const offsetY = parseFloat(overlayCanvas.dataset.offsetY || 0);
+
+            const scaleX = renderWidth / video.videoWidth;
+            const scaleY = renderHeight / video.videoHeight;
 
             currentPredictions.forEach(pred => {
                 const [x1, y1, x2, y2] = pred.bbox;
 
-                const sx1 = x1 * scaleX;
-                const sy1 = y1 * scaleY;
-                const sx2 = x2 * scaleX;
-                const sy2 = y2 * scaleY;
+                const sx1 = x1 * scaleX + offsetX;
+                const sy1 = y1 * scaleY + offsetY;
+                const sx2 = x2 * scaleX + offsetX;
+                const sy2 = y2 * scaleY + offsetY;
 
                 const w = sx2 - sx1;
                 const h = sy2 - sy1;
 
-                // Красивый градиентный прямоугольник
+                // Рисуем только если бокс попадает на экран
+                if (sx2 < 0 || sx1 > overlayCanvas.width || sy2 < 0 || sy1 > overlayCanvas.height) {
+                    return;
+                }
+
+                // Градиентный прямоугольник
                 overlayCtx.strokeStyle = '#00FF00';
                 overlayCtx.lineWidth = 3;
                 overlayCtx.shadowColor = '#00FF00';
@@ -482,7 +538,7 @@
                 overlayCtx.strokeRect(sx1, sy1, w, h);
                 overlayCtx.shadowBlur = 0;
 
-                // Фон для текста
+                // Emoji для объектов
                 const emoji = {
                     'person': '🚶',
                     'car': '🚗',
@@ -499,8 +555,8 @@
                 const textWidth = metrics.width;
                 const textHeight = 20;
 
-                // Полупрозрачный фон
-                overlayCtx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+                // Фон для текста
+                overlayCtx.fillStyle = 'rgba(0, 0, 0, 0.8)';
                 overlayCtx.fillRect(sx1, sy1 - textHeight - 5, textWidth + 10, textHeight + 5);
 
                 // Текст
@@ -510,13 +566,23 @@
                 // Точка глубины
                 if (pred.point_uv) {
                     const [u, v] = pred.point_uv;
-                    const su = u * scaleX;
-                    const sv = v * scaleY;
+                    const su = u * scaleX + offsetX;
+                    const sv = v * scaleY + offsetY;
 
                     overlayCtx.fillStyle = '#FF0000';
+                    overlayCtx.shadowColor = '#FF0000';
+                    overlayCtx.shadowBlur = 8;
                     overlayCtx.beginPath();
                     overlayCtx.arc(su, sv, 6, 0, Math.PI * 2);
                     overlayCtx.fill();
+                    overlayCtx.shadowBlur = 0;
+                    
+                    // Белый контур точки
+                    overlayCtx.strokeStyle = '#FFFFFF';
+                    overlayCtx.lineWidth = 2;
+                    overlayCtx.beginPath();
+                    overlayCtx.arc(su, sv, 6, 0, Math.PI * 2);
+                    overlayCtx.stroke();
                 }
             });
         }
