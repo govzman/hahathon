@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(echo \"PATH: $PATH\")",
+      "Read(//Users/vladpolyakov/**)",
+      "Read(//Users/vladpolyakov/.bun/**)"
+    ]
+  }
+}
